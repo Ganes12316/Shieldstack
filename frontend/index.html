@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/png" href="/shieldstack-logo.png" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, viewport-fit=cover" />
+    <title>ShieldStack — AI Code Security Scanner</title>
+
+    <!-- Android Chrome toolbar & PWA -->
+    <meta name="theme-color" content="#090D16" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="application-name" content="ShieldStack" />
+
+    <!-- iOS Safari (parity with Android) -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="ShieldStack" />
+    <link rel="apple-touch-icon" href="/shieldstack-logo.png" />
+
+    <meta name="description" content="ShieldStack is a free, open-source static security scanner for AI-generated codebases. Detect secrets, auth bypasses, SQL injection, and XSS instantly." />
+
+    <!-- Security headers (meta-tag equivalents) -->
+    <!-- Prevent clickjacking -->
+    <meta http-equiv="X-Frame-Options" content="DENY" />
+    <!-- Prevent MIME sniffing -->
+    <meta http-equiv="X-Content-Type-Options" content="nosniff" />
+    <!-- Referrer policy — don't leak URL to third parties -->
+    <meta name="referrer" content="strict-origin-when-cross-origin" />
+    <!-- Content Security Policy -->
+    <meta http-equiv="Content-Security-Policy"
+      content="
+        default-src 'self';
+        script-src  'self' 'unsafe-inline';
+        style-src   'self' 'unsafe-inline' https://fonts.googleapis.com;
+        font-src    'self' https://fonts.gstatic.com;
+        img-src     'self' data: blob:;
+        connect-src 'self' http://localhost:8000 http://127.0.0.1:8000;
+        frame-src   'none';
+        object-src  'none';
+        base-uri    'self';
+        form-action 'self';
+      "
+    />
+    <meta name="robots" content="index, follow" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
