@@ -131,18 +131,37 @@ export default function App() {
   };
 
   const [stats, setStats] = useState<Stats>({
-    repos_tested: 10,
+    repos_tested: 0,
     automated_tests: 41,
     languages_supported: 4,
-    bugs_found: 11,
-    total_scans: 12,
+    bugs_found: 0,
+    total_scans: 0,
   });
+
+  const updateStats = (incoming: Stats, completedScanFindings?: number) => {
+    if (completedScanFindings === undefined) {
+      setStats(incoming);
+      return;
+    }
+
+    setStats((current) => {
+      return {
+        ...incoming,
+        repos_tested: Math.max(incoming.repos_tested, current.repos_tested + 1),
+        bugs_found: Math.max(incoming.bugs_found, current.bugs_found + completedScanFindings),
+        total_scans: Math.max(
+          incoming.total_scans,
+          current.total_scans + 1,
+        ),
+      };
+    });
+  };
 
   const fetchStats = async () => {
     try {
       const res = await axios.get<Stats>(`${API_URL}/stats`);
       if (res.data) {
-        setStats(res.data);
+        updateStats(res.data);
       }
     } catch {
       // Keep fallback stats if backend offline
@@ -151,8 +170,6 @@ export default function App() {
 
   useEffect(() => {
     fetchStats();
-    const interval = setInterval(fetchStats, 3000);
-    return () => clearInterval(interval);
   }, []);
 
   const runScan = async () => {
@@ -180,7 +197,7 @@ export default function App() {
       });
       setResult(res.data);
       if (res.data.stats) {
-        setStats(res.data.stats);
+        updateStats(res.data.stats, res.data.findings.length);
       } else {
         fetchStats();
       }
@@ -425,15 +442,15 @@ export default function App() {
         <div className="telemetry-inner">
           <div className="telemetry-item">
             <span className="telemetry-icon amber">⚠️</span>
-            <span className="telemetry-val">{stats.bugs_found}</span> vulnerability findings intercepted
+            <span className="telemetry-val">{stats.bugs_found}</span> potential findings since restart
           </div>
           <div className="telemetry-item">
             <span className="telemetry-icon cyan">🛡️</span>
-            <span className="telemetry-val">{stats.repos_tested}</span> repositories audited
+            <span className="telemetry-val">{stats.repos_tested}</span> repositories scanned since restart
           </div>
           <div className="telemetry-item">
             <span className="telemetry-icon green">⚡</span>
-            <span className="telemetry-val">{stats.total_scans}</span> live security scans
+            <span className="telemetry-val">{stats.total_scans}</span> successful scans since restart
           </div>
         </div>
       </div>

@@ -75,9 +75,10 @@ def _findings_to_summary(findings) -> str:
     return "\n".join(lines)
 
 SYSTEM_PROMPT = """You are a security report writer for ShieldStack, a tool that scans \
-AI-generated code for common vulnerability patterns. You are given a list of ALREADY-CONFIRMED \
+AI-generated code for common vulnerability patterns. You are given a list of POTENTIAL \
 findings from deterministic static analysis — you do not decide whether something is a real \
-vulnerability, that has already been established. Your job is only to:
+vulnerability. Static analysis has not independently verified or exploited these issues. Your \
+job is to describe the evidence and remediation:
 1. Write a short executive summary (2-4 sentences) of the overall risk picture
 2. Group related findings if they form a single attack chain (e.g. a client-side check + the \
    backend route it fails to protect are one story, not two)
@@ -88,6 +89,9 @@ vulnerability, that has already been established. Your job is only to:
 5. Keep the tone factual and specific — no hype, no vague "this could be bad" language
 
 Do not invent findings that are not in the input. Do not change severity or confidence levels. \
+Describe results as potential or likely, never as confirmed vulnerabilities. Do not call the \
+scanned repository "ShieldStack"; ShieldStack is the scanner, and the repository is the scan \
+target. Mention confidence levels where relevant. \
 Output plain text, not markdown headers. Format each remediation-priority entry as:
 "Priority N: <what it is>
 Why it matters: <urgency reasoning>
