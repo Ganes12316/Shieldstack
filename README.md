@@ -31,6 +31,7 @@ The frontend defaults to `http://localhost:8000`. Copy `.env.example` to `.env` 
 | `GEMINI_MODEL` | Backend (optional) | Primary Gemini model; defaults to `gemini-3.5-flash-lite`, with `gemini-3.8-flash` as fallback. |
 | `FRONTEND_URL` | Backend | Deployed frontend origin allowed by CORS, e.g. `https://your-app.vercel.app`. |
 | `ALLOW_LOCAL_PATH` | Backend | Set to `1` only for trusted local development; leave unset or `0` on public hosting. |
+| `STATS_FILE` | Backend | Optional override for the scan counter file path. On Render, defaults to `/var/data/stats.json`. |
 | `VITE_API_URL` | Frontend | Backend base URL; defaults to `http://localhost:8000`. |
 
 ## Deployment
@@ -43,12 +44,15 @@ Create a Web Service from this repository with:
 - Start command: `uvicorn app.web.main:app --host 0.0.0.0 --port $PORT`
 - Environment: set `FRONTEND_URL` to the exact Vercel origin. Optionally set `GEMINI_API_KEY`. Keep `ALLOW_LOCAL_PATH` unset or set it to `0`.
 - Health check path: `/health`
+- To preserve scan counters across deploys and restarts, attach a persistent disk mounted at `/var/data`. The app uses `/var/data/stats.json` automatically on Render. Persistent disks require a paid Render service; without one, counters can reset when the service restarts.
 
 The model at `app/scanner/ml/model.pkl` and training data at `data/labeled_findings.csv` are required repository assets. Render free services can sleep when idle; the first request after inactivity may take up to about 60 seconds while the server wakes.
 
 ### Vercel frontend
 
 Import the `frontend` directory as the project root. Use build command `npm run build`, output directory `dist`, and set `VITE_API_URL` to the deployed Render API base URL (for example `https://your-service.onrender.com`). Set Render's `FRONTEND_URL` to the resulting Vercel origin, then redeploy the backend.
+
+The dashboard refreshes shared scan counters every 10 seconds. A scan performed in the current browser updates the counters as soon as the backend returns its result.
 
 ## Live demo
 

@@ -170,6 +170,11 @@ export default function App() {
 
   useEffect(() => {
     fetchStats();
+    // Refresh shared counters periodically so scans from other visitors appear
+    // without reloading the page. The scan response still updates this browser
+    // immediately when its own scan completes.
+    const statsTimer = window.setInterval(fetchStats, 10_000);
+    return () => window.clearInterval(statsTimer);
   }, []);
 
   const runScan = async () => {

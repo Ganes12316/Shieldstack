@@ -71,7 +71,15 @@ BLOCKED_DIRS = {
 }
 
 SKIP_DIRS = {"node_modules", ".git", "venv", "__pycache__", "dist", "build", "vendor"}
-STATS_FILE = Path(__file__).resolve().parent.parent.parent / "data" / "stats.json"
+# Render's filesystem is ephemeral unless a persistent disk is attached. Use
+# its conventional mount path automatically there; allow an explicit override
+# for other hosts and keep the repository data directory for local development.
+_default_stats_file = (
+    Path("/var/data/stats.json")
+    if os.getenv("RENDER") == "true"
+    else Path(__file__).resolve().parent.parent.parent / "data" / "stats.json"
+)
+STATS_FILE = Path(os.getenv("STATS_FILE", str(_default_stats_file)))
 
 DEFAULT_STATS = {
     "repos_tested": 0,
