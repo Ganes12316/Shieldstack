@@ -61,6 +61,8 @@ The dashboard refreshes shared scan counters every 30 seconds while the tab is v
 
 By default, ShieldStack skips common test and sample locations (`tests/`, `test/`, `__tests__/`, `fixtures/`, `sample_*/`, `samples/`, `examples/`, and `research_apps/`) and test-named files (`*test*.py`, `*.test.js`, `*.spec.js`, and `*.test.tsx`). This keeps intentionally vulnerable examples from dominating normal application results. If files are skipped, the result shows the count. Enable **Include test and sample code** in the web scanner to scan them too.
 
+The sample_* and research_apps folders are intentionally vulnerable test data. ShieldStack skips them by default and reports no issues in the project’s own code.
+
 The CLI also skips these files by default. Use `--include-fixtures` with either `--repo` or `--path` to include them:
 
 ```powershell
