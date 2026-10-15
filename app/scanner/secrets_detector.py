@@ -2,6 +2,7 @@ import re
 import math
 from pathlib import Path
 from .findings import Finding, Severity
+from .file_selection import iter_scannable_files, count_skipped_fixture_files
 
 # Known secret patterns — each AI coding tool tends to leave these in predictable spots
 SECRET_PATTERNS = {
@@ -112,25 +113,16 @@ def scan_file(file_path: Path) -> list[Finding]:
     return findings
 
 
-def scan_directory(root: Path, extensions=SCAN_EXTENSIONS) -> list[Finding]:
+def scan_directory(root: Path, extensions=SCAN_EXTENSIONS, include_fixtures: bool = False) -> list[Finding]:
     all_findings = []
-    for path in root.rglob("*"):
-        if any(part in SKIP_DIRS for part in path.parts):
-            continue
-        if path.name.endswith(".min.js"):
-            continue
-        if path.is_file() and (path.suffix in extensions or path.name == ".env"):
-            all_findings.extend(scan_file(path))
+    for path in iter_scannable_files(root, extensions, include_fixtures):
+        all_findings.extend(scan_file(path))
     return all_findings
 
 
-def get_scanned_file_count(root: Path, extensions=SCAN_EXTENSIONS) -> int:
-    count = 0
-    for path in root.rglob("*"):
-        if any(part in SKIP_DIRS for part in path.parts):
-            continue
-        if path.name.endswith(".min.js"):
-            continue
-        if path.is_file() and (path.suffix in extensions or path.name == ".env"):
-            count += 1
-    return count
+def get_scanned_file_count(root: Path, extensions=SCAN_EXTENSIONS, include_fixtures: bool = False) -> int:
+    return sum(1 for _ in iter_scannable_files(root, extensions, include_fixtures))
+
+
+def get_skipped_file_count(root: Path, extensions=SCAN_EXTENSIONS) -> int:
+    return count_skipped_fixture_files(root, extensions)

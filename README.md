@@ -56,3 +56,15 @@ The model at `app/scanner/ml/model.pkl` and training data at `data/labeled_findi
 The frontend is live at [https://shieldstack-one.vercel.app](https://shieldstack-one.vercel.app), with the backend at [https://shieldstack.onrender.com](https://shieldstack.onrender.com). For redeployments, import the `frontend` directory as the Vercel project root, use `npm run build` and output directory `dist`, and set `VITE_API_URL=https://shieldstack.onrender.com`.
 
 The dashboard refreshes shared scan counters every 30 seconds while the tab is visible and active. It pauses polling while hidden and after two minutes without user activity, so an idle page does not keep the free backend warm. A scan performed in the current browser updates the counters as soon as the backend returns its result. The display says “total” while Upstash is active and “since restart” when using local fallback storage. Repository source archives are downloaded temporarily and deleted after scanning. Finding details are sent to Google Gemini for the summary when Gemini is configured.
+
+## Test and sample code
+
+By default, ShieldStack skips common test and sample locations (`tests/`, `test/`, `__tests__/`, `fixtures/`, `sample_*/`, `samples/`, `examples/`, and `research_apps/`) and test-named files (`*test*.py`, `*.test.js`, `*.spec.js`, and `*.test.tsx`). This keeps intentionally vulnerable examples from dominating normal application results. If files are skipped, the result shows the count. Enable **Include test and sample code** in the web scanner to scan them too.
+
+The CLI also skips these files by default. Use `--include-fixtures` with either `--repo` or `--path` to include them:
+
+```powershell
+python -m app.cli --path . --include-fixtures
+```
+
+To exclude additional paths, add a `.shieldstackignore` file at the repository root with one glob pattern per line. Blank lines and lines beginning with `#` are ignored. These patterns are additive; the web checkbox or CLI flag opts into scanning those paths as well.

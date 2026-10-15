@@ -2041,6 +2041,23 @@ body { background: #09090b; color: #f4f4f5; }
   text-align: left;
 }
 
+.fixture-option {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: fit-content;
+  margin: 12px 2px 0;
+  color: #c4c4cc;
+  font-size: 0.88rem;
+  cursor: pointer;
+}
+
+.fixture-option input {
+  width: 16px;
+  height: 16px;
+  accent-color: #8b5cf6;
+}
+
 .results-heading {
   display: flex;
   align-items: end;
@@ -2052,6 +2069,7 @@ body { background: #09090b; color: #f4f4f5; }
 .results-heading h2 { margin: 0; color: #f4f4f5; font-size: 1.4rem; }
 .results-eyebrow { margin: 0 0 4px; color: #a1a1aa; font-size: 0.75rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
 .results-total { color: #d4d4d8; font-size: 0.88rem; font-weight: 600; }
+.skipped-files-note { margin: 12px 0; color: #c4c4cc; font-size: 0.88rem; }
 
 .severity-stat { padding: 18px 14px; }
 .severity-stat .stat-number { font-size: 1.8rem; }

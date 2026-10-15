@@ -33,6 +33,7 @@ type ScanResponse = {
   summary_report: string;
   total: number;
   critical_count: number;
+  skipped_files: number;
   stats?: Stats;
 };
 
@@ -81,6 +82,7 @@ const FAQS = [
 
 export default function App() {
   const [path, setPath] = useState("");
+  const [includeFixtures, setIncludeFixtures] = useState(false);
   const [loading, setLoading] = useState(false);
   const [serverWaking, setServerWaking] = useState(false);
   const [result, setResult] = useState<ScanResponse | null>(null);
@@ -135,7 +137,7 @@ export default function App() {
 
   const [stats, setStats] = useState<Stats>({
     repos_tested: 0,
-    automated_tests: 46,
+    automated_tests: 51,
     languages_supported: 4,
     bugs_found: 0,
     total_scans: 0,
@@ -250,6 +252,7 @@ export default function App() {
       const isUrl = trimmed.startsWith("https://github.com/");
       const res = await axios.post<ScanResponse>(`${API_URL}/scan`, {
         ...(isUrl ? { repo_url: trimmed } : { local_path: trimmed }),
+        include_fixtures: includeFixtures,
       });
       setResult(res.data);
       if (res.data.stats) {
@@ -353,12 +356,20 @@ export default function App() {
               <div className="num">{statsAvailability === "available" ? stats.repos_tested : statsAvailability === "loading" ? "Loading" : "Unavailable"}</div>
               <div className="label">Repos Audited</div>
             </div>
+            <label className="fixture-option">
+              <input
+                type="checkbox"
+                checked={includeFixtures}
+                onChange={(event) => setIncludeFixtures(event.target.checked)}
+              />
+              Include test and sample code
+            </label>
             <div className="stat-chip">
               <div className="num">{statsAvailability === "available" ? stats.bugs_found : statsAvailability === "loading" ? "Loading" : "Unavailable"}</div>
               <div className="label">Potential Findings</div>
             </div>
             <div className="stat-chip">
-              <div className="num">46</div>
+              <div className="num">51</div>
               <div className="label">Tests</div>
             </div>
             <div className="stat-chip">
@@ -443,12 +454,27 @@ export default function App() {
                   <pre>{result.summary_report}</pre>
                 </div>
 
+                {result.skipped_files > 0 && result.total > 0 && (
+                  <p className="skipped-files-note" role="status">
+                    Skipped {result.skipped_files} test/sample files. Include them with the checkbox above.
+                  </p>
+                )}
+
                 {result.findings.length === 0 ? (
                   <div className="no-findings" role="status">
                     <span className="no-findings-mark" aria-hidden="true">✓</span>
                     <div>
-                      <h3>No findings detected</h3>
-                      <p>The scanner did not identify issues in the checks it ran. This is not a substitute for a full security review.</p>
+                      {result.summary_report.startsWith("All ") ? (
+                        <>
+                          <h3>Only test/sample files found</h3>
+                          <p>{result.summary_report}</p>
+                        </>
+                      ) : (
+                        <>
+                          <h3>No findings detected</h3>
+                          <p>The scanner did not identify issues in the checks it ran. This is not a substitute for a full security review.</p>
+                        </>
+                      )}
                     </div>
                   </div>
                 ) : <div className="findings-list">

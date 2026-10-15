@@ -14,7 +14,8 @@ from slowapi.errors import RateLimitExceeded
 from pydantic import BaseModel
 
 from app.scanner.repo_loader import load_repo, RepoLoadError
-from app.scanner.secrets_detector import scan_directory, get_scanned_file_count
+from app.scanner.secrets_detector import scan_directory, get_scanned_file_count, get_skipped_file_count
+from app.scanner.file_selection import should_skip_path
 from app.scanner.auth_detector import scan_file_for_client_only_auth
 from app.scanner.injection_detector import detect_sql_injection, detect_xss
 from app.scanner.backend_detector import extract_backend_routes, extract_frontend_calls, cross_reference
@@ -92,7 +93,7 @@ UPSTASH_STATS_KEYS = ("repos_tested", "bugs_found", "total_scans")
 
 DEFAULT_STATS = {
     "repos_tested": 0,
-    "automated_tests": 46,
+    "automated_tests": 51,
     "languages_supported": 4,
     "bugs_found": 0,
     "total_scans": 0,
@@ -210,6 +211,7 @@ def _is_safe_path(requested: Path) -> bool:
 class ScanRequest(BaseModel):
     repo_url: str | None = None
     local_path: str | None = None
+    include_fixtures: bool = False
 
 
 class FindingOut(BaseModel):
@@ -237,21 +239,22 @@ class ScanResponse(BaseModel):
     summary_report: str
     total: int
     critical_count: int
+    skipped_files: int = 0
     stats: StatsResponse | None = None
 
 
 # ─── Scanner ──────────────────────────────────────────────────
 
-def run_full_scan(target: Path) -> list:
-    findings = scan_directory(target)
+def run_full_scan(target: Path, include_fixtures: bool = False) -> list:
+    findings = scan_directory(target, include_fixtures=include_fixtures)
 
     for p in target.rglob("*"):
-        if p.is_file() and not _should_skip(p) and p.suffix in (".js", ".jsx", ".ts", ".tsx"):
+        if p.is_file() and not should_skip_path(p, target, include_fixtures) and p.suffix in (".js", ".jsx", ".ts", ".tsx"):
             findings.extend(scan_file_for_client_only_auth(p))
 
     backend_routes, frontend_calls = [], []
     for p in target.rglob("*"):
-        if p.is_file() and not _should_skip(p):
+        if p.is_file() and not should_skip_path(p, target, include_fixtures):
             if p.suffix == ".py":
                 backend_routes.extend(extract_backend_routes(p))
             if p.suffix in (".js", ".jsx", ".ts", ".tsx"):
@@ -260,7 +263,7 @@ def run_full_scan(target: Path) -> list:
     findings.extend(cross_reference(frontend_calls, backend_routes))
 
     for p in target.rglob("*"):
-        if p.is_file() and not _should_skip(p):
+        if p.is_file() and not should_skip_path(p, target, include_fixtures):
             findings.extend(detect_sql_injection(p))
             findings.extend(detect_xss(p))
 
@@ -347,12 +350,24 @@ def scan(req: ScanRequest, request: Request):
         )
 
     try:
-        file_count = get_scanned_file_count(target)
+        file_count = get_scanned_file_count(target, include_fixtures=req.include_fixtures)
+        skipped_files = 0 if req.include_fixtures else get_skipped_file_count(target)
     except Exception:
         if req.repo_url:
             shutil.rmtree(target, ignore_errors=True)
         raise HTTPException(status_code=500, detail="Couldn't inspect the repository.") from None
     if file_count == 0:
+        if skipped_files:
+            if req.repo_url:
+                shutil.rmtree(target, ignore_errors=True)
+            return ScanResponse(
+                findings=[],
+                summary_report=f"All {skipped_files} scannable files were excluded as test or sample code. Enable ‘Include test and sample code’ to scan them.",
+                total=0,
+                critical_count=0,
+                skipped_files=skipped_files,
+                stats=load_stats(),
+            )
         if req.repo_url:
             shutil.rmtree(target, ignore_errors=True)
         raise HTTPException(
@@ -365,7 +380,7 @@ def scan(req: ScanRequest, request: Request):
         )
 
     try:
-        findings = run_full_scan(target)
+        findings = run_full_scan(target, include_fixtures=req.include_fixtures)
         findings = _sanitize_finding_paths(findings, target)
     except Exception as e:
         if req.repo_url:
@@ -400,6 +415,7 @@ def scan(req: ScanRequest, request: Request):
         summary_report=report,
         total=len(findings_out),
         critical_count=critical,
+        skipped_files=skipped_files,
         stats=updated_stats,
     )
 

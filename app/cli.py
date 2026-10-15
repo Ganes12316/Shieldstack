@@ -1,7 +1,8 @@
 import click
 from pathlib import Path
 from app.scanner.repo_loader import load_repo, RepoLoadError
-from app.scanner.secrets_detector import scan_directory, get_scanned_file_count
+from app.scanner.secrets_detector import scan_directory, get_scanned_file_count, get_skipped_file_count
+from app.scanner.file_selection import should_skip_path
 from app.scanner.auth_detector import scan_file_for_client_only_auth
 from app.scanner.injection_detector import detect_sql_injection, detect_xss
 from app.scanner.report_generator import generate_report
@@ -16,21 +17,12 @@ from app.scanner.reachability_checker import check_route_reachability
 import warnings
 warnings.filterwarnings("ignore", category=UserWarning, module="sklearn")
 
-SKIP_DIRS = {"node_modules", ".git", "venv", "__pycache__", "dist", "build", "vendor"}
-
-def _should_skip(p: Path) -> bool:
-    if any(part in SKIP_DIRS for part in p.parts):
-        return True
-    if p.name.endswith(".min.js"):
-        return True
-    return False
-
-
 @click.command()
 @click.option("--repo", help="GitHub repo URL to clone and scan")
 @click.option("--path", help="Local directory to scan instead of cloning")
 @click.option("--verify-live", help="Base URL of a RUNNING LOCAL instance (localhost only) to check route reachability against, e.g. http://localhost:8000")
-def main(repo, path, verify_live):
+@click.option("--include-fixtures", is_flag=True, help="Include test and sample code in the scan")
+def main(repo, path, verify_live, include_fixtures):
     target = None
 
     if repo:
@@ -58,8 +50,15 @@ def main(repo, path, verify_live):
 
     click.echo(f"Scanning {target}...")
 
-    file_count = get_scanned_file_count(target)
+    file_count = get_scanned_file_count(target, include_fixtures=include_fixtures)
+    skipped_files = 0 if include_fixtures else get_skipped_file_count(target)
     if file_count == 0:
+        if skipped_files:
+            click.echo(
+                f"\n⚠️  All {skipped_files} scannable files were excluded as test or sample code.\n"
+                "  Re-run with --include-fixtures to scan them.\n"
+            )
+            return
         click.echo(
             "\n⚠️  No scannable files found.\n"
             "  Secrets/config scanning covers: Python, JS/TS/JSX, HTML, Java, Go, Ruby, PHP, C#, "
@@ -68,21 +67,23 @@ def main(repo, path, verify_live):
         )
         return
     click.echo(f"  Found {file_count} file(s) to analyze.\n")
+    if skipped_files:
+        click.echo(f"  Skipped {skipped_files} test/sample files. Include them with --include-fixtures.\n")
 
     try:
         # Phase 1: secrets + config
-        findings = scan_directory(target)
+        findings = scan_directory(target, include_fixtures=include_fixtures)
 
         # Phase 2: client-side-only auth (AST)
         for p in target.rglob("*"):
-            if p.is_file() and not _should_skip(p) and p.suffix in (".js", ".jsx", ".ts", ".tsx"):
+            if p.is_file() and not should_skip_path(p, target, include_fixtures) and p.suffix in (".js", ".jsx", ".ts", ".tsx"):
                 findings.extend(scan_file_for_client_only_auth(p))
 
         # Phase 3: backend route extraction + frontend/backend cross-reference
         backend_routes = []
         frontend_calls = []
         for p in target.rglob("*"):
-            if p.is_file() and not _should_skip(p):
+            if p.is_file() and not should_skip_path(p, target, include_fixtures):
                 if p.suffix == ".py":
                     backend_routes.extend(extract_backend_routes(p))
                 if p.suffix in (".js", ".jsx", ".ts", ".tsx"):
@@ -92,7 +93,7 @@ def main(repo, path, verify_live):
 
         # Phase 4: injection detection (SQLi + XSS)
         for p in target.rglob("*"):
-            if p.is_file() and not _should_skip(p):
+            if p.is_file() and not should_skip_path(p, target, include_fixtures):
                 findings.extend(detect_sql_injection(p))
                 findings.extend(detect_xss(p))
 
