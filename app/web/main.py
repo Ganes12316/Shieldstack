@@ -1,4 +1,5 @@
 import json
+import ipaddress
 import os
 import re
 import shutil
@@ -9,7 +10,8 @@ from pathlib import Path
 import requests
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from slowapi import Limiter, _rate_limit_exceeded_handler
+from fastapi.responses import JSONResponse
+from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 from pydantic import BaseModel
 
@@ -27,18 +29,46 @@ from app.web.feedback import FeedbackIn, save_feedback
 warnings.filterwarnings("ignore", category=UserWarning, module="sklearn")
 
 # ─── Rate limiter ──────────────────────────────────────────────
-# Use the direct peer address for rate limiting; never trust a client-provided IP header.
 def _client_ip(request: Request) -> str:
-    # Do not trust client-supplied forwarding headers. Behind a proxy this may
-    # group requests under the proxy address, but it cannot be spoofed by users.
-    return request.client.host if request.client else "unknown"
+    direct_address = request.client.host if request.client else "unknown"
+    forwarded_for = request.headers.get("x-forwarded-for")
+    if forwarded_for:
+        try:
+            trusted_hops = int(os.getenv("TRUSTED_PROXY_HOPS", "1"))
+        except (TypeError, ValueError):
+            trusted_hops = 1
+        if trusted_hops > 0:
+            addresses = [address.strip() for address in forwarded_for.split(",")]
+            if len(addresses) >= trusted_hops:
+                candidate = addresses[-trusted_hops]
+                try:
+                    return str(ipaddress.ip_address(candidate))
+                except ValueError:
+                    pass
+    return direct_address
 
-limiter = Limiter(key_func=_client_ip, default_limits=["200/day", "50/hour"])
+limiter = Limiter(key_func=_client_ip, default_limits=["300/day", "60/hour"])
 
 app = FastAPI(title="ShieldStack API")
 
 app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+def rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded):
+    retry_after = 60
+    current_limit = getattr(request.state, "view_rate_limit", None)
+    if current_limit:
+        try:
+            window_reset, _ = limiter.limiter.get_window_stats(current_limit[0], *current_limit[1])
+            retry_after = max(1, int(window_reset) + 1)
+        except Exception:
+            pass
+    return JSONResponse(
+        status_code=429,
+        content={"detail": "Too many requests. Please wait a minute and try again."},
+        headers={"Retry-After": str(retry_after)},
+    )
+
+
+app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)
 
 # ─── CORS — tightened to only needed methods ───────────────────
 allowed_origins = ["http://localhost:5173"]
@@ -292,13 +322,14 @@ def _sanitize_finding_paths(findings: list, target: Path) -> list:
 # ─── Routes ───────────────────────────────────────────────────
 
 @app.get("/stats", response_model=StatsResponse)
-@limiter.limit("60/minute")
+@limiter.limit("120/minute")
 def get_stats(request: Request):
     return load_stats()
 
 
 @app.post("/scan", response_model=ScanResponse)
-@limiter.limit("10/minute")          # Max 10 scans per minute per IP
+@limiter.limit("30/hour")
+@limiter.limit("10/minute")
 def scan(req: ScanRequest, request: Request):
     if req.repo_url:
         # Only public HTTPS GitHub repositories are supported.
@@ -421,6 +452,7 @@ def scan(req: ScanRequest, request: Request):
 
 
 @app.get("/health")
+@limiter.exempt
 def health():
     return {"status": "ok"}
 
@@ -431,7 +463,8 @@ def root():
 
 
 @app.post("/feedback")
-@limiter.limit("5/minute")           # Anti-spam: 5 feedback per minute per IP
+@limiter.limit("20/hour")
+@limiter.limit("5/minute")
 def submit_feedback(fb: FeedbackIn, request: Request):
     if not fb.message or not fb.message.strip():
         raise HTTPException(status_code=400, detail="Feedback message can't be empty.")

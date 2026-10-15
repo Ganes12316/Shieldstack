@@ -31,6 +31,7 @@ The frontend defaults to `http://localhost:8000`. Copy `.env.example` to `.env` 
 | `GEMINI_MODEL` | Backend (optional) | Primary Gemini model; defaults to `gemini-3.5-flash-lite`, with `gemini-3.8-flash` as fallback. |
 | `FRONTEND_URL` | Backend | Frontend origin allowed by CORS, e.g. `https://shieldstack-one.vercel.app`. |
 | `ALLOW_LOCAL_PATH` | Backend | Set to `1` only for trusted local development; leave unset or `0` on public hosting. |
+| `TRUSTED_PROXY_HOPS` | Backend | Number of trusted proxy entries at the end of `X-Forwarded-For`; defaults to `1` for Render. The client address is selected from this position from the right. |
 | `UPSTASH_REDIS_REST_URL` | Backend (optional) | Upstash Redis REST endpoint for persistent scan counters, copied from the Upstash database's REST API page. |
 | `UPSTASH_REDIS_REST_TOKEN` | Backend (optional) | Upstash Redis REST token. Never exposed to the browser or logs. |
 | `STATS_FILE` | Backend (optional) | Local JSON fallback path; used only when its parent folder exists and is writable. Defaults to `data/stats.json`. |
@@ -56,6 +57,20 @@ The model at `app/scanner/ml/model.pkl` and training data at `data/labeled_findi
 The frontend is live at [https://shieldstack-one.vercel.app](https://shieldstack-one.vercel.app), with the backend at [https://shieldstack.onrender.com](https://shieldstack.onrender.com). For redeployments, import the `frontend` directory as the Vercel project root, use `npm run build` and output directory `dist`, and set `VITE_API_URL=https://shieldstack.onrender.com`.
 
 The dashboard refreshes shared scan counters every 30 seconds while the tab is visible and active. It pauses polling while hidden and after two minutes without user activity, so an idle page does not keep the free backend warm. A scan performed in the current browser updates the counters as soon as the backend returns its result. The display says “total” while Upstash is active and “since restart” when using local fallback storage. Repository source archives are downloaded temporarily and deleted after scanning. Finding details are sent to Google Gemini for the summary when Gemini is configured.
+
+### API rate limits
+
+Rate limits are tracked per client IP. On Render, the API reads the client address from `X-Forwarded-For`, counting from the end of the list by `TRUSTED_PROXY_HOPS` (default `1`) so a forged first entry is ignored. Requests without a valid forwarded address use the direct peer address.
+
+| Route | Limit |
+| --- | --- |
+| `/health` | Exempt |
+| `/stats` | 120/minute |
+| `/scan` | 10/minute and 30/hour |
+| `/feedback` | 5/minute and 20/hour |
+| Other routes | 300/day and 60/hour |
+
+Rate limited requests return HTTP 429 with a `Retry-After` header.
 
 ## Test and sample code
 
