@@ -6,6 +6,7 @@ import warnings
 from dataclasses import replace
 from pathlib import Path
 
+import requests
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -41,7 +42,7 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 # ─── CORS — tightened to only needed methods ───────────────────
 allowed_origins = ["http://localhost:5173"]
 frontend_url = os.getenv("FRONTEND_URL", "").strip().rstrip("/")
-if frontend_url:
+if frontend_url and frontend_url != "*":
     allowed_origins.append(frontend_url)
 app.add_middleware(
     CORSMiddleware,
@@ -71,19 +72,27 @@ BLOCKED_DIRS = {
 }
 
 SKIP_DIRS = {"node_modules", ".git", "venv", "__pycache__", "dist", "build", "vendor"}
-# Render's filesystem is ephemeral unless a persistent disk is attached. Use
-# its conventional mount path automatically there; allow an explicit override
-# for other hosts and keep the repository data directory for local development.
-_default_stats_file = (
-    Path("/var/data/stats.json")
-    if os.getenv("RENDER") == "true"
-    else Path(__file__).resolve().parent.parent.parent / "data" / "stats.json"
-)
-STATS_FILE = Path(os.getenv("STATS_FILE", str(_default_stats_file)))
+DEFAULT_STATS_FILE = Path(__file__).resolve().parent.parent.parent / "data" / "stats.json"
+
+
+def _select_stats_file() -> Path:
+    configured = os.getenv("STATS_FILE")
+    if configured:
+        candidate = Path(configured).expanduser()
+        folder = candidate.parent
+        if folder.is_dir() and os.access(folder, os.W_OK):
+            return candidate
+    return DEFAULT_STATS_FILE
+
+
+STATS_FILE = _select_stats_file()
+UPSTASH_REDIS_REST_URL = os.getenv("UPSTASH_REDIS_REST_URL", "").strip().rstrip("/")
+UPSTASH_REDIS_REST_TOKEN = os.getenv("UPSTASH_REDIS_REST_TOKEN", "").strip()
+UPSTASH_STATS_KEYS = ("repos_tested", "bugs_found", "total_scans")
 
 DEFAULT_STATS = {
     "repos_tested": 0,
-    "automated_tests": 41,
+    "automated_tests": 46,
     "languages_supported": 4,
     "bugs_found": 0,
     "total_scans": 0,
@@ -91,14 +100,45 @@ DEFAULT_STATS = {
 
 
 def load_stats() -> dict:
+    if UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN:
+        try:
+            stats = _load_upstash_stats()
+            return {**DEFAULT_STATS, **stats, "stats_backend": "upstash"}
+        except Exception:
+            pass
+    return _load_local_stats()
+
+
+def _load_local_stats() -> dict:
     try:
         if STATS_FILE.exists():
             with open(STATS_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
-                return {**DEFAULT_STATS, **data}
+                return {**DEFAULT_STATS, **data, "stats_backend": "local"}
     except Exception:
         pass
-    return DEFAULT_STATS.copy()
+    return {**DEFAULT_STATS, "stats_backend": "local"}
+
+
+def _upstash_request(command: list):
+    response = requests.post(
+        UPSTASH_REDIS_REST_URL,
+        json=command,
+        headers={"Authorization": f"Bearer {UPSTASH_REDIS_REST_TOKEN}"},
+        timeout=3,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    if "error" in payload:
+        raise RuntimeError("Upstash Redis request failed")
+    return payload.get("result")
+
+
+def _load_upstash_stats() -> dict:
+    values = _upstash_request(["MGET", *UPSTASH_STATS_KEYS])
+    if not isinstance(values, list) or len(values) != len(UPSTASH_STATS_KEYS):
+        raise ValueError("Unexpected Upstash stats response")
+    return {key: int(value or 0) for key, value in zip(UPSTASH_STATS_KEYS, values)}
 
 
 def save_stats(stats: dict) -> None:
@@ -111,7 +151,21 @@ def save_stats(stats: dict) -> None:
 
 
 def record_scan_stats(findings_count: int) -> dict:
+    if UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN:
+        try:
+            _upstash_request(["INCRBY", "repos_tested", 1])
+            _upstash_request(["INCRBY", "bugs_found", findings_count])
+            _upstash_request(["INCRBY", "total_scans", 1])
+            return {**DEFAULT_STATS, **_load_upstash_stats(), "stats_backend": "upstash"}
+        except Exception:
+            # A stats provider outage must never fail an otherwise successful scan.
+            pass
+
     stats = load_stats()
+    if stats.get("stats_backend") == "upstash":
+        # Redis was configured but failed during an increment/read; use the
+        # local file as the fallback source for this update.
+        stats = _load_local_stats()
     stats["repos_tested"] += 1
     stats["bugs_found"] += findings_count
     stats["total_scans"] += 1
@@ -175,6 +229,7 @@ class StatsResponse(BaseModel):
     languages_supported: int
     bugs_found: int
     total_scans: int
+    stats_backend: str
 
 
 class ScanResponse(BaseModel):
@@ -333,7 +388,12 @@ def scan(req: ScanRequest, request: Request):
         for f in findings
     ]
     critical = sum(1 for f in findings_out if f.severity == "CRITICAL")
-    updated_stats = record_scan_stats(len(findings_out))
+    try:
+        updated_stats = record_scan_stats(len(findings_out))
+    except Exception:
+        # Counter storage is best-effort and must not turn a completed scan into
+        # an API failure.
+        updated_stats = {**DEFAULT_STATS, "stats_backend": "local"}
 
     return ScanResponse(
         findings=findings_out,

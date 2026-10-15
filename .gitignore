@@ -20,3 +20,5 @@ data/feedback.json
 data/feedback.json
 
 data/stats.json
+
+.pytest_tmp/

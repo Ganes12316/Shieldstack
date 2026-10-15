@@ -27,12 +27,15 @@ The frontend defaults to `http://localhost:8000`. Copy `.env.example` to `.env` 
 
 | Variable | Where | Purpose |
 | --- | --- | --- |
-| `GEMINI_API_KEY` | Backend (optional) | Gemini summary generation; scans fall back to a local summary when unset. |
+| `GEMINI_API_KEY` | Backend (optional) | Sends finding details to Google Gemini for the scan summary; a local summary is used when unset or unavailable. |
 | `GEMINI_MODEL` | Backend (optional) | Primary Gemini model; defaults to `gemini-3.5-flash-lite`, with `gemini-3.8-flash` as fallback. |
-| `FRONTEND_URL` | Backend | Deployed frontend origin allowed by CORS, e.g. `https://your-app.vercel.app`. |
+| `FRONTEND_URL` | Backend | Frontend origin allowed by CORS, e.g. `https://shieldstack-one.vercel.app`. |
 | `ALLOW_LOCAL_PATH` | Backend | Set to `1` only for trusted local development; leave unset or `0` on public hosting. |
-| `STATS_FILE` | Backend | Optional override for the scan counter file path. On Render, defaults to `/var/data/stats.json`. |
-| `VITE_API_URL` | Frontend | Backend base URL; defaults to `http://localhost:8000`. |
+| `UPSTASH_REDIS_REST_URL` | Backend (optional) | Upstash Redis REST endpoint for persistent scan counters, copied from the Upstash database's REST API page. |
+| `UPSTASH_REDIS_REST_TOKEN` | Backend (optional) | Upstash Redis REST token. Never exposed to the browser or logs. |
+| `STATS_FILE` | Backend (optional) | Local JSON fallback path; used only when its parent folder exists and is writable. Defaults to `data/stats.json`. |
+| `VITE_API_URL` | Frontend | Backend base URL; defaults to `http://localhost:8000`; production uses `https://shieldstack.onrender.com`. |
+| `PORT` | Render | Supplied by Render and used by Uvicorn's start command. |
 
 ## Deployment
 
@@ -42,18 +45,14 @@ Create a Web Service from this repository with:
 
 - Build command: `pip install -r requirements.txt`
 - Start command: `uvicorn app.web.main:app --host 0.0.0.0 --port $PORT`
-- Environment: set `FRONTEND_URL` to the exact Vercel origin. Optionally set `GEMINI_API_KEY`. Keep `ALLOW_LOCAL_PATH` unset or set it to `0`.
+- Environment: set `FRONTEND_URL=https://shieldstack-one.vercel.app`. Optionally set `GEMINI_API_KEY` and `GEMINI_MODEL`. Keep `ALLOW_LOCAL_PATH` unset or set it to `0`.
 - Health check path: `/health`
-- To preserve scan counters across deploys and restarts, attach a persistent disk mounted at `/var/data`. The app uses `/var/data/stats.json` automatically on Render. Persistent disks require a paid Render service; without one, counters can reset when the service restarts.
+- For persistent counters on the free Render tier, create a free Upstash Redis database, copy its REST URL and token, and set them as `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` in Render's environment settings. Redeploy after setting them. When either value is absent or Redis is unavailable, counters use the local `data/stats.json` fallback, which can reset with the hosted instance.
 
-The model at `app/scanner/ml/model.pkl` and training data at `data/labeled_findings.csv` are required repository assets. Render free services can sleep when idle; the first request after inactivity may take up to about 60 seconds while the server wakes.
+The model at `app/scanner/ml/model.pkl` and training data at `data/labeled_findings.csv` are required repository assets. The free Render server can sleep when idle; its first request after inactivity can take up to about one minute to wake.
 
 ### Vercel frontend
 
-Import the `frontend` directory as the project root. Use build command `npm run build`, output directory `dist`, and set `VITE_API_URL` to the deployed Render API base URL (for example `https://your-service.onrender.com`). Set Render's `FRONTEND_URL` to the resulting Vercel origin, then redeploy the backend.
+The frontend is live at [https://shieldstack-one.vercel.app](https://shieldstack-one.vercel.app), with the backend at [https://shieldstack.onrender.com](https://shieldstack.onrender.com). For redeployments, import the `frontend` directory as the Vercel project root, use `npm run build` and output directory `dist`, and set `VITE_API_URL=https://shieldstack.onrender.com`.
 
-The dashboard refreshes shared scan counters every 10 seconds. A scan performed in the current browser updates the counters as soon as the backend returns its result.
-
-## Live demo
-
-Coming soon: [Live demo URL]
+The dashboard refreshes shared scan counters every 30 seconds while the tab is visible and active. It pauses polling while hidden and after two minutes without user activity, so an idle page does not keep the free backend warm. A scan performed in the current browser updates the counters as soon as the backend returns its result. The display says “total” while Upstash is active and “since restart” when using local fallback storage. Repository source archives are downloaded temporarily and deleted after scanning. Finding details are sent to Google Gemini for the summary when Gemini is configured.

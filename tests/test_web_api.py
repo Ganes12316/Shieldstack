@@ -13,6 +13,7 @@ def test_get_stats_endpoint():
     assert "languages_supported" in data
     assert "bugs_found" in data
     assert "total_scans" in data
+    assert data["stats_backend"] in {"local", "upstash"}
 
 def test_root_endpoint():
     response = client.get("/")

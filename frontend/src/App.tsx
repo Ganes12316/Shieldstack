@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import axios from "axios";
 import { generateFixSnippet } from "./fixSnippets";
 import "./App.css";
@@ -14,6 +14,7 @@ type Stats = {
   languages_supported: number;
   bugs_found: number;
   total_scans: number;
+  stats_backend: "local" | "upstash";
 };
 
 type Finding = {
@@ -34,6 +35,8 @@ type ScanResponse = {
   critical_count: number;
   stats?: Stats;
 };
+
+type StatsAvailability = "loading" | "available" | "unavailable";
 
 const SEVERITY_COLORS: Record<string, string> = {
   CRITICAL: "#F87171",
@@ -56,7 +59,7 @@ const FAQS = [
   },
   {
     q: "Is ShieldStack completely free and private to run?",
-    a: "Yes, 100%. The static analysis engine runs entirely in your environment with zero code uploaded to external servers. The optional Gemini AI summary leverages Google's free API tier, with an automated fallback to structured text summaries if offline.",
+    a: "Repository scans run on the hosted ShieldStack backend. When Gemini is configured, finding details are sent to Google's Gemini API to write the summary; otherwise ShieldStack uses a local fallback summary.",
   },
   {
     q: "How does ShieldStack differ from conventional AST security tools?",
@@ -68,7 +71,7 @@ const FAQS = [
   },
   {
     q: "Can I scan private repositories and local projects?",
-    a: "Yes! While GitHub repository scanning targets public repository URLs via HTTPS, you can scan any local code folder on your disk instantly—whether private, open-source, or client work.",
+    a: "The hosted scanner accepts public GitHub repository URLs. Local folder scanning is disabled on the public server and can be enabled only for trusted local development.",
   },
   {
     q: "How rigorously has ShieldStack been validated?",
@@ -132,11 +135,14 @@ export default function App() {
 
   const [stats, setStats] = useState<Stats>({
     repos_tested: 0,
-    automated_tests: 41,
+    automated_tests: 46,
     languages_supported: 4,
     bugs_found: 0,
     total_scans: 0,
+    stats_backend: "local",
   });
+  const [statsAvailability, setStatsAvailability] = useState<StatsAvailability>("loading");
+  const statsRequestInFlight = useRef(false);
 
   const updateStats = (incoming: Stats, completedScanFindings?: number) => {
     if (completedScanFindings === undefined) {
@@ -158,23 +164,68 @@ export default function App() {
   };
 
   const fetchStats = async () => {
+    if (statsRequestInFlight.current) return;
+    statsRequestInFlight.current = true;
     try {
       const res = await axios.get<Stats>(`${API_URL}/stats`);
       if (res.data) {
         updateStats(res.data);
+        setStatsAvailability("available");
       }
     } catch {
-      // Keep fallback stats if backend offline
+      setStatsAvailability("unavailable");
+    } finally {
+      statsRequestInFlight.current = false;
     }
   };
 
   useEffect(() => {
+    let statsTimer: number | undefined;
+    let lastActivityAt = Date.now();
+    const startPolling = () => {
+      if (statsTimer === undefined && !document.hidden) {
+        statsTimer = window.setInterval(() => {
+          if (Date.now() - lastActivityAt > 2 * 60_000) {
+            stopPolling();
+            return;
+          }
+          fetchStats();
+        }, 30_000);
+      }
+    };
+    const stopPolling = () => {
+      if (statsTimer !== undefined) {
+        window.clearInterval(statsTimer);
+        statsTimer = undefined;
+      }
+    };
+    const handleVisibility = () => {
+      if (document.hidden) {
+        stopPolling();
+      } else {
+        lastActivityAt = Date.now();
+        fetchStats();
+        startPolling();
+      }
+    };
+    const handleActivity = () => {
+      lastActivityAt = Date.now();
+      startPolling();
+    };
+
     fetchStats();
-    // Refresh shared counters periodically so scans from other visitors appear
-    // without reloading the page. The scan response still updates this browser
-    // immediately when its own scan completes.
-    const statsTimer = window.setInterval(fetchStats, 10_000);
-    return () => window.clearInterval(statsTimer);
+    startPolling();
+    document.addEventListener("visibilitychange", handleVisibility);
+    document.addEventListener("pointerdown", handleActivity, { passive: true });
+    document.addEventListener("keydown", handleActivity);
+    document.addEventListener("touchstart", handleActivity, { passive: true });
+    return () => {
+      stopPolling();
+      document.removeEventListener("visibilitychange", handleVisibility);
+      document.removeEventListener("pointerdown", handleActivity);
+      document.removeEventListener("keydown", handleActivity);
+      document.removeEventListener("touchstart", handleActivity);
+    };
   }, []);
 
   const runScan = async () => {
@@ -203,6 +254,7 @@ export default function App() {
       setResult(res.data);
       if (res.data.stats) {
         updateStats(res.data.stats, res.data.findings.length);
+        setStatsAvailability("available");
       } else {
         fetchStats();
       }
@@ -283,7 +335,7 @@ export default function App() {
         <div className="hero-content">
           <div className="hero-badge">
             <img src="/shieldstack-logo.png" alt="Logo" className="badge-mini-logo" />
-            <span>🛡️ Open-Source Security Engine · 100% Free Local Execution</span>
+            <span>🛡️ Open-Source Security Engine · Hosted Repository Scanning</span>
           </div>
           <h1>Autonomous Security Guardrails<br />For AI-Generated Codebases</h1>
           <TypewriterReveal
@@ -298,16 +350,16 @@ export default function App() {
 
           <div className="stats-row">
             <div className="stat-chip">
-              <div className="num">{stats.repos_tested}</div>
+              <div className="num">{statsAvailability === "available" ? stats.repos_tested : statsAvailability === "loading" ? "Loading" : "Unavailable"}</div>
               <div className="label">Repos Audited</div>
             </div>
             <div className="stat-chip">
-              <div className="num">{stats.bugs_found}</div>
-              <div className="label">Flaws Intercepted</div>
+              <div className="num">{statsAvailability === "available" ? stats.bugs_found : statsAvailability === "loading" ? "Loading" : "Unavailable"}</div>
+              <div className="label">Potential Findings</div>
             </div>
             <div className="stat-chip">
-              <div className="num">{stats.automated_tests}</div>
-              <div className="label">Test Suites</div>
+              <div className="num">46</div>
+              <div className="label">Tests</div>
             </div>
             <div className="stat-chip">
               <div className="num">{stats.languages_supported}</div>
@@ -316,7 +368,7 @@ export default function App() {
           </div>
 
           <div className="hero-checklist-row">
-            <div className="check-item"><span className="check-icon">🛡️</span> <span className="live-num">{(stats.automated_tests || 41) * 150}+</span> AST Inspection Rules</div>
+            <div className="check-item">4 detection categories</div>
             <div className="check-item"><span className="check-icon">🔒</span> Zero-Trust Static Analysis</div>
             <div className="check-item"><span className="check-icon">⚡</span> Automated Remediation Code</div>
           </div>
@@ -344,7 +396,7 @@ export default function App() {
               </button>
             </div>
             <p className="scan-privacy-note" id="scan-privacy-note">
-              Scans run on the configured backend. Only scan repositories you’re authorized to access.
+              Repositories are downloaded temporarily by the hosted backend and deleted after scanning. Finding details are sent to Google Gemini to write the summary when Gemini is configured.
             </p>
           </div>
         </div>
@@ -447,15 +499,15 @@ export default function App() {
         <div className="telemetry-inner">
           <div className="telemetry-item">
             <span className="telemetry-icon amber">⚠️</span>
-            <span className="telemetry-val">{stats.bugs_found}</span> potential findings since restart
+            <span className="telemetry-val">{statsAvailability === "available" ? stats.bugs_found : statsAvailability === "loading" ? "Loading" : "Unavailable"}</span> {statsAvailability !== "available" ? "" : stats.stats_backend === "upstash" ? "total findings" : "potential findings since restart"}
           </div>
           <div className="telemetry-item">
             <span className="telemetry-icon cyan">🛡️</span>
-            <span className="telemetry-val">{stats.repos_tested}</span> repositories scanned since restart
+            <span className="telemetry-val">{statsAvailability === "available" ? stats.repos_tested : statsAvailability === "loading" ? "Loading" : "Unavailable"}</span> {statsAvailability !== "available" ? "" : stats.stats_backend === "upstash" ? "total repositories scanned" : "repositories scanned since restart"}
           </div>
           <div className="telemetry-item">
             <span className="telemetry-icon green">⚡</span>
-            <span className="telemetry-val">{stats.total_scans}</span> successful scans since restart
+            <span className="telemetry-val">{statsAvailability === "available" ? stats.total_scans : statsAvailability === "loading" ? "Loading" : "Unavailable"}</span> {statsAvailability !== "available" ? "" : stats.stats_backend === "upstash" ? "total scans" : "successful scans since restart"}
           </div>
         </div>
       </div>
@@ -481,8 +533,8 @@ export default function App() {
           </div>
           <div className="vibe-card">
             <div className="vibe-icon-box red">🔒</div>
-            <h3>Instant Local Verification</h3>
-            <p>Validate your application's security posture in milliseconds directly on your machine before pushing to production.</p>
+            <h3>Hosted Repository Verification</h3>
+            <p>Run a static security scan on the hosted backend before pushing to production.</p>
           </div>
         </div>
       </section>
@@ -538,7 +590,7 @@ export default function App() {
             <div className="step-circle">🔗</div>
             <span className="step-tag">STEP 1</span>
             <h3>Target Input</h3>
-            <p>Enter a public GitHub repository URL or select a local project directory</p>
+            <p>Enter a public GitHub repository URL for hosted scanning.</p>
           </div>
           <div className="step-node">
             <div className="step-circle">🔍</div>
@@ -666,8 +718,8 @@ const supabase = createClient(
           </button>
 
           <div className="cta-guarantees-row">
-            <span>🛡️ 100% Confidential Scanning</span>
-            <span>🔒 Zero Cloud Storage Required</span>
+            <span>🛡️ Repository source deleted after scan</span>
+            <span>🔒 Finding details sent to Gemini when configured</span>
             <span>⚡ Millisecond Rule Execution</span>
             <span>✨ Open-Source &amp; Always Free</span>
           </div>
@@ -706,9 +758,9 @@ const supabase = createClient(
           <button className="popup-close-btn" onClick={dismissPopup} aria-label="Close popup">
             ✕
           </button>
-          <div className="popup-badge">⚡ 100% Free Local Inspection</div>
+          <div className="popup-badge">⚡ Hosted Public Repository Scan</div>
           <h3>Scan Your Project Now</h3>
-          <p>Audit your AI-assisted code, GitHub repository, or local files for critical security risks instantly.</p>
+          <p>Scan a public GitHub repository through the hosted service. Source files are temporary; finding details go to Gemini when configured.</p>
           <div className="popup-actions">
             <button className="popup-scan-btn" onClick={scrollToScanAndFocus}>
               Launch Free Scan ➔

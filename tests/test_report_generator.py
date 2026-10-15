@@ -1,4 +1,5 @@
 from app.scanner.report_generator import _generate_with_fallback
+from app.scanner import report_generator
 
 
 class ServiceUnavailable(Exception):
@@ -29,3 +30,19 @@ def test_503_retries_then_uses_fallback_model():
         "gemini-3.8-flash",
     ]
     assert waits == [1, 2, 4]
+
+
+def test_gemini_client_uses_20_second_request_timeout(monkeypatch):
+    captured = {}
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+
+    def fake_client(**kwargs):
+        captured.update(kwargs)
+        return object()
+
+    monkeypatch.setattr(report_generator.genai, "Client", fake_client)
+
+    report_generator._client()
+
+    assert captured["http_options"].timeout == 20_000
+    assert captured["http_options"].retry_options.attempts == 1
