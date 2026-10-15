@@ -356,14 +356,6 @@ export default function App() {
               <div className="num">{statsAvailability === "available" ? stats.repos_tested : statsAvailability === "loading" ? "Loading" : "Unavailable"}</div>
               <div className="label">Repos Audited</div>
             </div>
-            <label className="fixture-option">
-              <input
-                type="checkbox"
-                checked={includeFixtures}
-                onChange={(event) => setIncludeFixtures(event.target.checked)}
-              />
-              Include test and sample code
-            </label>
             <div className="stat-chip">
               <div className="num">{statsAvailability === "available" ? stats.bugs_found : statsAvailability === "loading" ? "Loading" : "Unavailable"}</div>
               <div className="label">Potential Findings</div>
@@ -376,6 +368,14 @@ export default function App() {
               <div className="num">{stats.languages_supported}</div>
               <div className="label">Languages</div>
             </div>
+            <label className="fixture-option">
+              <input
+                type="checkbox"
+                checked={includeFixtures}
+                onChange={(event) => setIncludeFixtures(event.target.checked)}
+              />
+              Include test and sample code
+            </label>
           </div>
 
           <div className="hero-checklist-row">
