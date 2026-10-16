@@ -145,6 +145,7 @@ export default function App() {
   });
   const [statsAvailability, setStatsAvailability] = useState<StatsAvailability>("loading");
   const statsRequestInFlight = useRef(false);
+  const lastBackendResponseAt = useRef(0);
 
   const updateStats = (incoming: Stats, completedScanFindings?: number) => {
     if (completedScanFindings === undefined) {
@@ -170,6 +171,7 @@ export default function App() {
     statsRequestInFlight.current = true;
     try {
       const res = await axios.get<Stats>(`${API_URL}/stats`);
+      lastBackendResponseAt.current = Date.now();
       if (res.data) {
         updateStats(res.data);
         setStatsAvailability("available");
@@ -237,9 +239,7 @@ export default function App() {
       return;
     }
     setLoading(true);
-    let wakingTimer: ReturnType<typeof setTimeout> | undefined;
     setServerWaking(false);
-    wakingTimer = setTimeout(() => setServerWaking(true), 5000);
     setError(null);
     setResult(null);
     // Scroll to results area immediately so user sees the loading animation
@@ -250,10 +250,31 @@ export default function App() {
     try {
       const trimmed = path.trim();
       const isUrl = trimmed.startsWith("https://github.com/");
-      const res = await axios.post<ScanResponse>(`${API_URL}/scan`, {
+      if (Date.now() - lastBackendResponseAt.current > 60_000) {
+        setServerWaking(true);
+        try {
+          await axios.get(`${API_URL}/health`, { timeout: 90_000 });
+          lastBackendResponseAt.current = Date.now();
+        } catch {
+          // A failed health probe should not prevent the scan attempt.
+        }
+      }
+      setServerWaking(false);
+      const scanRequest = () => axios.post<ScanResponse>(`${API_URL}/scan`, {
         ...(isUrl ? { repo_url: trimmed } : { local_path: trimmed }),
         include_fixtures: includeFixtures,
-      });
+      }, { timeout: 120_000 });
+      let res;
+      try {
+        res = await scanRequest();
+      } catch (firstError: any) {
+        if (firstError?.response || !axios.isAxiosError(firstError) || firstError.code === "ERR_CANCELED") {
+          throw firstError;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 5000));
+        res = await scanRequest();
+      }
+      lastBackendResponseAt.current = Date.now();
       setResult(res.data);
       if (res.data.stats) {
         updateStats(res.data.stats, res.data.findings.length);
@@ -271,14 +292,13 @@ export default function App() {
         setError("⏱️ Too many scans — you've hit the rate limit. Please wait a minute and try again.");
       } else {
         const detail = e?.response?.data?.detail;
-        setError(detail || "Scan failed — check the backend is running.");
+        setError(detail || "The server may be waking up. Please try again in a moment.");
       }
       setTimeout(() => {
         const resultsEl = document.getElementById("results-panel");
         if (resultsEl) resultsEl.scrollIntoView({ behavior: "smooth", block: "start" });
       }, 150);
     } finally {
-      if (wakingTimer) clearTimeout(wakingTimer);
       setServerWaking(false);
       setLoading(false);
     }
@@ -425,7 +445,7 @@ export default function App() {
               <div className="scan-animation">
                 <div className="scan-line" />
                 <p>Scanning for vulnerability patterns...</p>
-                {serverWaking && <p>Connecting to the scanner...</p>}
+                {serverWaking && <p>Waking up the server, this can take up to a minute...</p>}
               </div>
             )}
 
